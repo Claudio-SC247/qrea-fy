@@ -3,5 +3,3 @@ qrcode[pil]>=7.4.2
 Pillow>=10.0.0
 pyshorteners>=1.0.1
 upstash-redis>=1.0.0
-
-
