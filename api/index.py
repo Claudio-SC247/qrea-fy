@@ -284,11 +284,11 @@ def sec_headers(resp: Response) -> Response:
         "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
         "Content-Security-Policy": (
             "default-src 'self'; "
-            "script-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.vercel-insights.com; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src https://fonts.gstatic.com; "
             "img-src 'self' data:; "
-            "connect-src 'self'; "
+            "connect-src 'self' https://vitals.vercel-insights.com; "
             "frame-ancestors 'none';"
         ),
     })
