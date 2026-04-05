@@ -1,10 +1,10 @@
 import os, io, re, json, base64, ipaddress, urllib.parse, hashlib, hmac
 import qrcode
-from PIL import Image, UnidentifiedImageError
+import requests
+from PIL import Image
 from flask import Flask, request, jsonify, send_from_directory, Response
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import requests
 
 # ── Upstash Redis (Vercel KV) — graceful fallback ─────────────────────────────
 try:
@@ -19,13 +19,11 @@ except Exception:
 KV_KEY       = "qreafy:url_history"
 KV_MAX_ITEMS = 100
 
-# ── Absolute paths (required for Vercel serverless) ───────────────────────────
 BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PUBLIC_DIR = os.path.join(BASE_DIR, "public")
 
 app = Flask(__name__, static_folder=PUBLIC_DIR, static_url_path="")
 
-# ── Rate limiting ─────────────────────────────────────────────────────────────
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -33,14 +31,13 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
-# ── Security constants ────────────────────────────────────────────────────────
 MAX_DATA_LEN    = 2000
 MAX_LOGO_BYTES  = 3 * 1024 * 1024
 MAGIC_BYTES     = {b"\x89PNG", b"\xff\xd8\xff", b"GIF8", b"RIFF"}
 BLOCKED_HOSTS   = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
+HISTORY_TOKEN   = os.environ.get("HISTORY_TOKEN", "")
 
-# ── History admin token (set HISTORY_TOKEN env var in Vercel) ─────────────────
-HISTORY_TOKEN = os.environ.get("HISTORY_TOKEN", "")
+_REQ_HEADERS = {"User-Agent": "qreafy/1.0", "Accept": "text/plain"}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -81,8 +78,7 @@ def _clamp(val, lo, hi):
     return max(lo, min(val, hi))
 
 
-def _verify_token(req: request) -> bool:
-    """Constant-time token comparison to prevent timing attacks."""
+def _verify_token(req) -> bool:
     if not HISTORY_TOKEN:
         return False
     provided = req.headers.get("X-History-Token", "").strip()
@@ -92,6 +88,57 @@ def _verify_token(req: request) -> bool:
         hashlib.sha256(provided.encode()).digest(),
         hashlib.sha256(HISTORY_TOKEN.encode()).digest(),
     )
+
+
+def _shorten_with_fallback(url: str):
+    """
+    Try multiple shortener APIs in order.
+    Returns the short URL string, or None if all fail.
+
+    Priority:
+      1. is.gd  — accepts redirecting URLs, Google Maps, etc.
+      2. v.gd   — same backend as is.gd, different domain
+      3. TinyURL — last resort, rejects some redirect chains
+    """
+    providers = [
+        {
+            "url": "https://is.gd/create.php",
+            "params": {"format": "simple", "url": url},
+            "method": "GET",
+            "prefix": "https://is.gd/",
+        },
+        {
+            "url": "https://v.gd/create.php",
+            "params": {"format": "simple", "url": url},
+            "method": "GET",
+            "prefix": "https://v.gd/",
+        },
+        {
+            "url": "https://tinyurl.com/api-create.php",
+            "params": {"url": url},
+            "method": "GET",
+            "prefix": "https://tinyurl.com/",
+        },
+    ]
+
+    for p in providers:
+        try:
+            resp = requests.get(
+                p["url"],
+                params=p["params"],
+                timeout=8,
+                headers=_REQ_HEADERS,
+                allow_redirects=True,
+            )
+            if resp.status_code == 200:
+                short = resp.text.strip()
+                if short.startswith(p["prefix"]):
+                    return short
+                app.logger.warning("Unexpected response from %s: %s", p["url"], short[:80])
+        except Exception as e:
+            app.logger.warning("Shortener %s failed: %s", p["url"], e)
+
+    return None
 
 
 # ── KV helpers ────────────────────────────────────────────────────────────────
@@ -164,11 +211,11 @@ def make_qr_base64(data, logo_bytes=None, size=10, border=2,
 @app.after_request
 def sec_headers(resp: Response) -> Response:
     resp.headers.update({
-        "X-Content-Type-Options":  "nosniff",
-        "X-Frame-Options":         "DENY",
-        "X-XSS-Protection":        "1; mode=block",
-        "Referrer-Policy":         "strict-origin-when-cross-origin",
-        "Permissions-Policy":      "camera=(), microphone=(), geolocation=()",
+        "X-Content-Type-Options":    "nosniff",
+        "X-Frame-Options":           "DENY",
+        "X-XSS-Protection":          "1; mode=block",
+        "Referrer-Policy":           "strict-origin-when-cross-origin",
+        "Permissions-Policy":        "camera=(), microphone=(), geolocation=()",
         "Strict-Transport-Security": "max-age=63072000; includeSubDomains; preload",
         "Content-Security-Policy": (
             "default-src 'self'; "
@@ -181,7 +228,6 @@ def sec_headers(resp: Response) -> Response:
         ),
     })
     resp.headers.pop("Server", None)
-    # Block all CORS — only same-origin requests allowed
     resp.headers.pop("Access-Control-Allow-Origin", None)
     return resp
 
@@ -250,23 +296,13 @@ def api_shorten_url():
     if not safe:
         return jsonify({"error": reason}), 400
 
-    try:
-        resp = requests.get(
-            "https://tinyurl.com/api-create.php",
-            params={"url": url},
-            timeout=8,
-            headers={"User-Agent": "qreafy/1.0"},
-        )
-        resp.raise_for_status()
-        short = resp.text.strip()
-        if not short.startswith("https://tinyurl.com/"):
-            raise ValueError(f"Respuesta inesperada de TinyURL: {short[:80]}")
-        item = {"short_url": short, "original_url": url}
-        kv_push(item)
-        return jsonify({**item, "kv": KV_AVAILABLE})
-    except Exception as e:
-        app.logger.error("shorten-url error: %s", e)
+    short = _shorten_with_fallback(url)
+    if short is None:
         return jsonify({"error": "No se pudo acortar la URL. Intenta de nuevo."}), 500
+
+    item = {"short_url": short, "original_url": url}
+    kv_push(item)
+    return jsonify({**item, "kv": KV_AVAILABLE})
 
 
 # ── History — protected by token ──────────────────────────────────────────────
@@ -293,7 +329,7 @@ def api_clear_history():
         return jsonify({"error": "No se pudo limpiar."}), 500
 
 
-# ── Rate limit error handler ──────────────────────────────────────────────────
+# ── Error handlers ────────────────────────────────────────────────────────────
 
 @app.errorhandler(429)
 def rate_limit_exceeded(_):
