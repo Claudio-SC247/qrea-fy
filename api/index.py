@@ -37,7 +37,23 @@ MAGIC_BYTES     = {b"\x89PNG", b"\xff\xd8\xff", b"GIF8", b"RIFF"}
 BLOCKED_HOSTS   = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 HISTORY_TOKEN   = os.environ.get("HISTORY_TOKEN", "")
 
-_REQ_HEADERS = {"User-Agent": "qreafy/1.0", "Accept": "text/plain"}
+# Domains known to be URL shorteners — their URLs must be resolved
+# before passing to third-party shorteners (anti-spam policy)
+_SHORTENER_DOMAINS = {
+    "goo.gl", "maps.app.goo.gl", "bit.ly", "bitly.com",
+    "tinyurl.com", "t.co", "ow.ly", "buff.ly", "ift.tt",
+    "dlvr.it", "fb.me", "youtu.be", "amzn.to", "short.link",
+    "rb.gy", "cutt.ly", "tiny.cc", "shorturl.at", "is.gd",
+    "v.gd", "lnkd.in", "wp.me", "adf.ly", "bc.vc",
+}
+
+_REQ_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (compatible; Googlebot/2.1; "
+        "+http://www.google.com/bot.html)"
+    ),
+    "Accept": "text/html,application/xhtml+xml,*/*",
+}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -61,6 +77,59 @@ def _is_safe_url(url: str) -> tuple:
     except ValueError:
         pass
     return True, ""
+
+
+def _is_shortener_domain(url: str) -> bool:
+    """Return True if this URL comes from a known URL shortener service."""
+    try:
+        host = urllib.parse.urlparse(url).hostname or ""
+        return any(
+            host == d or host.endswith("." + d)
+            for d in _SHORTENER_DOMAINS
+        )
+    except Exception:
+        return False
+
+
+def _resolve_url(url: str) -> str:
+    """
+    Follow redirect chain and return the final destination URL.
+    Uses HEAD first (fast), falls back to GET if server rejects HEAD.
+    Returns the original URL if resolution fails.
+    """
+    try:
+        resp = requests.head(
+            url,
+            allow_redirects=True,
+            timeout=6,
+            headers=_REQ_HEADERS,
+        )
+        final = resp.url
+        # Validate the resolved URL is safe to use
+        if final and final.startswith(("http://", "https://")) and final != url:
+            app.logger.info("Resolved %s -> %s", url, final)
+            return final
+    except Exception as e:
+        app.logger.warning("HEAD resolve failed for %s: %s", url, e)
+
+    # Some servers reject HEAD — try GET with stream=True (no body download)
+    try:
+        resp = requests.get(
+            url,
+            allow_redirects=True,
+            timeout=6,
+            headers=_REQ_HEADERS,
+            stream=True,
+        )
+        resp.close()
+        final = resp.url
+        if final and final.startswith(("http://", "https://")) and final != url:
+            app.logger.info("Resolved (GET) %s -> %s", url, final)
+            return final
+    except Exception as e:
+        app.logger.warning("GET resolve failed for %s: %s", url, e)
+
+    return url  # fallback: use original
 
 
 def _validate_image_magic(data: bytes) -> bool:
@@ -90,53 +159,49 @@ def _verify_token(req) -> bool:
     )
 
 
-def _shorten_with_fallback(url: str):
+def _shorten_with_fallback(url: str) -> str | None:
     """
-    Try multiple shortener APIs in order.
-    Returns the short URL string, or None if all fail.
-
-    Priority:
-      1. is.gd  — accepts redirecting URLs, Google Maps, etc.
-      2. v.gd   — same backend as is.gd, different domain
-      3. TinyURL — last resort, rejects some redirect chains
+    Try is.gd → v.gd → TinyURL in order.
+    Returns short URL or None if all fail.
     """
     providers = [
         {
-            "url": "https://is.gd/create.php",
+            "api":    "https://is.gd/create.php",
             "params": {"format": "simple", "url": url},
-            "method": "GET",
             "prefix": "https://is.gd/",
         },
         {
-            "url": "https://v.gd/create.php",
+            "api":    "https://v.gd/create.php",
             "params": {"format": "simple", "url": url},
-            "method": "GET",
             "prefix": "https://v.gd/",
         },
         {
-            "url": "https://tinyurl.com/api-create.php",
+            "api":    "https://tinyurl.com/api-create.php",
             "params": {"url": url},
-            "method": "GET",
             "prefix": "https://tinyurl.com/",
         },
     ]
-
     for p in providers:
         try:
             resp = requests.get(
-                p["url"],
+                p["api"],
                 params=p["params"],
                 timeout=8,
-                headers=_REQ_HEADERS,
-                allow_redirects=True,
+                headers={"User-Agent": "qreafy/1.0", "Accept": "text/plain"},
             )
             if resp.status_code == 200:
                 short = resp.text.strip()
                 if short.startswith(p["prefix"]):
                     return short
-                app.logger.warning("Unexpected response from %s: %s", p["url"], short[:80])
+                app.logger.warning(
+                    "Unexpected response from %s: %s", p["api"], short[:120]
+                )
+            else:
+                app.logger.warning(
+                    "HTTP %s from %s", resp.status_code, p["api"]
+                )
         except Exception as e:
-            app.logger.warning("Shortener %s failed: %s", p["url"], e)
+            app.logger.warning("Shortener %s failed: %s", p["api"], e)
 
     return None
 
@@ -273,7 +338,9 @@ def api_generate_qr():
             logo_bytes = raw
 
     try:
-        qr_b64 = make_qr_base64(data, logo_bytes, size, border, fill_color, back_color, logo_ratio)
+        qr_b64 = make_qr_base64(
+            data, logo_bytes, size, border, fill_color, back_color, logo_ratio
+        )
         return jsonify({"qr": qr_b64})
     except Exception:
         return jsonify({"error": "Error generando QR."}), 500
@@ -296,10 +363,23 @@ def api_shorten_url():
     if not safe:
         return jsonify({"error": reason}), 400
 
-    short = _shorten_with_fallback(url)
+    # ── Key fix: resolve URL shortener chains before shortening ──────────────
+    # Services like maps.app.goo.gl, bit.ly, t.co etc. are themselves
+    # shorteners. Third-party APIs (is.gd, TinyURL) reject them as anti-spam.
+    # We follow redirects to get the real destination URL first.
+    url_to_shorten = url
+    if _is_shortener_domain(url):
+        resolved = _resolve_url(url)
+        safe2, _ = _is_safe_url(resolved)
+        if safe2:
+            url_to_shorten = resolved
+            app.logger.info("Using resolved URL: %s", url_to_shorten)
+
+    short = _shorten_with_fallback(url_to_shorten)
     if short is None:
         return jsonify({"error": "No se pudo acortar la URL. Intenta de nuevo."}), 500
 
+    # Store the original URL the user entered (not the resolved one)
     item = {"short_url": short, "original_url": url}
     kv_push(item)
     return jsonify({**item, "kv": KV_AVAILABLE})
