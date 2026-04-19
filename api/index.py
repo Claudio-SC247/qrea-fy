@@ -1,4 +1,4 @@
-import os, io, re, json, base64, ipaddress, urllib.parse, hashlib, hmac
+import os, io, re, json, base64, ipaddress, urllib.parse, hashlib, hmac, time
 import qrcode
 import requests
 from PIL import Image
@@ -24,6 +24,9 @@ PUBLIC_DIR = os.path.join(BASE_DIR, "public")
 
 app = Flask(__name__, static_folder=PUBLIC_DIR, static_url_path="")
 
+# Limit max request body to 4 MB (prevents DoS via large JSON payloads)
+app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024
+
 limiter = Limiter(
     get_remote_address,
     app=app,
@@ -37,8 +40,6 @@ MAGIC_BYTES     = {b"\x89PNG", b"\xff\xd8\xff", b"GIF8", b"RIFF"}
 BLOCKED_HOSTS   = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 HISTORY_TOKEN   = os.environ.get("HISTORY_TOKEN", "")
 
-# Domains known to be URL shorteners — their URLs must be resolved
-# before passing to third-party shorteners (anti-spam policy)
 _SHORTENER_DOMAINS = {
     "goo.gl", "maps.app.goo.gl", "bit.ly", "bitly.com",
     "tinyurl.com", "t.co", "ow.ly", "buff.ly", "ift.tt",
@@ -80,7 +81,6 @@ def _is_safe_url(url: str) -> tuple:
 
 
 def _is_shortener_domain(url: str) -> bool:
-    """Return True if this URL comes from a known URL shortener service."""
     try:
         host = urllib.parse.urlparse(url).hostname or ""
         return any(
@@ -92,34 +92,21 @@ def _is_shortener_domain(url: str) -> bool:
 
 
 def _resolve_url(url: str) -> str:
-    """
-    Follow redirect chain and return the final destination URL.
-    Uses HEAD first (fast), falls back to GET if server rejects HEAD.
-    Returns the original URL if resolution fails.
-    """
     try:
         resp = requests.head(
-            url,
-            allow_redirects=True,
-            timeout=6,
-            headers=_REQ_HEADERS,
+            url, allow_redirects=True, timeout=6, headers=_REQ_HEADERS,
         )
         final = resp.url
-        # Validate the resolved URL is safe to use
         if final and final.startswith(("http://", "https://")) and final != url:
             app.logger.info("Resolved %s -> %s", url, final)
             return final
     except Exception as e:
         app.logger.warning("HEAD resolve failed for %s: %s", url, e)
 
-    # Some servers reject HEAD — try GET with stream=True (no body download)
     try:
         resp = requests.get(
-            url,
-            allow_redirects=True,
-            timeout=6,
-            headers=_REQ_HEADERS,
-            stream=True,
+            url, allow_redirects=True, timeout=6,
+            headers=_REQ_HEADERS, stream=True,
         )
         resp.close()
         final = resp.url
@@ -129,7 +116,7 @@ def _resolve_url(url: str) -> str:
     except Exception as e:
         app.logger.warning("GET resolve failed for %s: %s", url, e)
 
-    return url  # fallback: use original
+    return url
 
 
 def _validate_image_magic(data: bytes) -> bool:
@@ -148,6 +135,7 @@ def _clamp(val, lo, hi):
 
 
 def _verify_token(req) -> bool:
+    """Used only for destructive operations (DELETE history)."""
     if not HISTORY_TOKEN:
         return False
     provided = req.headers.get("X-History-Token", "").strip()
@@ -160,10 +148,6 @@ def _verify_token(req) -> bool:
 
 
 def _shorten_with_fallback(url: str) -> str | None:
-    """
-    Try is.gd → v.gd → TinyURL in order.
-    Returns short URL or None if all fail.
-    """
     providers = [
         {
             "api":    "https://is.gd/create.php",
@@ -184,9 +168,7 @@ def _shorten_with_fallback(url: str) -> str | None:
     for p in providers:
         try:
             resp = requests.get(
-                p["api"],
-                params=p["params"],
-                timeout=8,
+                p["api"], params=p["params"], timeout=8,
                 headers={"User-Agent": "qreafy/1.0", "Accept": "text/plain"},
             )
             if resp.status_code == 200:
@@ -197,12 +179,9 @@ def _shorten_with_fallback(url: str) -> str | None:
                     "Unexpected response from %s: %s", p["api"], short[:120]
                 )
             else:
-                app.logger.warning(
-                    "HTTP %s from %s", resp.status_code, p["api"]
-                )
+                app.logger.warning("HTTP %s from %s", resp.status_code, p["api"])
         except Exception as e:
             app.logger.warning("Shortener %s failed: %s", p["api"], e)
-
     return None
 
 
@@ -212,6 +191,8 @@ def kv_push(item: dict) -> None:
     if not KV_AVAILABLE:
         return
     try:
+        # Always include timestamp (ms) so the frontend can filter "today"
+        item.setdefault("ts", int(time.time() * 1000))
         _kv.lpush(KV_KEY, json.dumps(item, ensure_ascii=False))
         _kv.ltrim(KV_KEY, 0, KV_MAX_ITEMS - 1)
     except Exception as e:
@@ -363,10 +344,6 @@ def api_shorten_url():
     if not safe:
         return jsonify({"error": reason}), 400
 
-    # ── Key fix: resolve URL shortener chains before shortening ──────────────
-    # Services like maps.app.goo.gl, bit.ly, t.co etc. are themselves
-    # shorteners. Third-party APIs (is.gd, TinyURL) reject them as anti-spam.
-    # We follow redirects to get the real destination URL first.
     url_to_shorten = url
     if _is_shortener_domain(url):
         resolved = _resolve_url(url)
@@ -379,19 +356,23 @@ def api_shorten_url():
     if short is None:
         return jsonify({"error": "No se pudo acortar la URL. Intenta de nuevo."}), 500
 
-    # Store the original URL the user entered (not the resolved one)
-    item = {"short_url": short, "original_url": url}
+    item = {
+        "short_url":    short,
+        "original_url": url,
+        "ts":           int(time.time() * 1000),
+    }
     kv_push(item)
     return jsonify({**item, "kv": KV_AVAILABLE})
 
 
-# ── History — protected by token ──────────────────────────────────────────────
+# ── History — GET is public, DELETE requires token ────────────────────────────
+# Rationale: no user auth yet — history is shared/global. Once per-user auth
+# is added (Phase 2), this endpoint will filter by user_id from session.
+# DELETE stays protected to prevent accidental or malicious wipes.
 
 @app.route("/api/history", methods=["GET"])
 @limiter.limit("30 per minute")
 def api_history():
-    if not _verify_token(request):
-        return jsonify({"error": "No autorizado."}), 401
     return jsonify({"history": kv_get_all(), "kv_available": KV_AVAILABLE})
 
 
