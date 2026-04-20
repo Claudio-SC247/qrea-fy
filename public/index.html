@@ -437,3 +437,381 @@
             <div class="drop-txt"><strong>Arrastra tu imagen</strong> o haz clic<br>PNG · JPG · GIF · WEBP — máx. 3 MB</div>
             <img id="logo-prev" src="" alt="Vista previa del logo"/>
           </div>
+          <div class="f" style="margin-top:.75rem;">
+            <label>Tamaño logo — <span id="rv">28</span>%</label>
+            <input type="range" id="lr" min="10" max="42" value="28" oninput="document.getElementById('rv').textContent=this.value"/>
+          </div>
+          <button class="btn btn-s btn-sm" onclick="clearLogo()" style="margin-top:.45rem;">✕ Quitar logo</button>
+        </div>
+
+        <button class="btn btn-p" id="btn-gen" onclick="genQR()">
+          <span class="spin" id="sp-qr" aria-hidden="true"></span>◈ Generar QR
+        </button>
+        <div class="err" id="qr-err" role="alert"></div>
+        <div class="rate-warn" id="qr-rate">⚠ Límite alcanzado. Espera un momento antes de generar otro QR.</div>
+      </div>
+
+      <div class="card sticky-col">
+        <div class="card-lbl">Vista previa</div>
+        <div class="qr-area">
+          <div class="qr-ph" id="qr-ph" aria-live="polite">
+            <div class="qr-ph-ico" aria-hidden="true">▣</div>Tu QR aparecerá aquí
+          </div>
+          <img id="qr-img" src="" alt="Código QR generado"/>
+        </div>
+        <div class="qr-acts" id="qr-acts">
+          <button class="btn btn-p" onclick="dlQR()">⬇ Descargar PNG</button>
+          <button class="btn btn-s" onclick="cpQR()">⎘ Copiar imagen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ PANEL URL ═══════════════════════════════ -->
+  <div id="p-url" class="panel" role="tabpanel">
+    <div class="g2">
+
+      <div class="col-stack">
+        <div class="card">
+          <div class="card-lbl">Acortador de URLs</div>
+
+          <div class="stats-bar" id="stats-bar" style="display:none;">
+            <div class="stat-chip">Total: <span id="stat-total">0</span></div>
+            <div class="stat-chip">Hoy: <span id="stat-today">0</span></div>
+          </div>
+
+          <div class="f">
+            <label for="long-url">URL larga *</label>
+            <div class="url-bar">
+              <input type="url" id="long-url" placeholder="https://ejemplo.com/ruta-muy-larga" maxlength="2000" autocomplete="off"/>
+              <button class="btn btn-p btn-sm" id="btn-short" onclick="shortenURL()">
+                <span class="spin" id="sp-url" aria-hidden="true"></span>Acortar
+              </button>
+            </div>
+            <div class="err" id="url-err" role="alert"></div>
+            <div class="rate-warn" id="url-rate">⚠ Límite alcanzado. Espera un momento antes de acortar otra URL.</div>
+          </div>
+
+          <div class="res-box" id="url-res" aria-live="polite">
+            <div class="res-lbl">🔗 URL acortada</div>
+            <div class="res-url"  id="r-short"></div>
+            <div class="res-lbl">URL original</div>
+            <div class="res-orig" id="r-orig"></div>
+            <div class="res-btns">
+              <button class="cp-btn" id="cp-main" onclick="cpURL()">⎘ Copiar</button>
+              <button class="cp-btn qr-url-btn" onclick="urlToQR()">◈ Crear QR</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-lbl">
+          Historial
+          <span class="kv-badge kv-off" id="kv-badge">⬤ local</span>
+        </div>
+        <div class="hist-header">
+          <span style="font-size:.67rem;color:var(--muted);font-family:var(--mono);" id="hist-count"></span>
+          <button class="btn btn-s btn-sm" onclick="clearHistory()">🗑 Limpiar</button>
+        </div>
+        <ul class="hist" id="hist" aria-label="Historial de URLs acortadas">
+          <li id="hist-empty" style="color:var(--muted);font-family:var(--mono);font-size:.73rem;text-align:center;padding:1.5rem 0;">
+            Cargando…
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span id="t-ico" aria-hidden="true"></span>
+  <span id="t-msg"></span>
+</div>
+
+<script>
+/* ══ TEMA ═══════════════════════════════════════ */
+const html = document.documentElement;
+const modeBtn = document.getElementById('mode-btn');
+
+function applyTheme(t) {
+  html.setAttribute('data-theme', t);
+  modeBtn.textContent = t === 'dark' ? '🌙' : '☀️';
+  document.getElementById('theme-color-meta').content = t === 'dark' ? '#060610' : '#f4f4ff';
+  localStorage.setItem('qreafy-theme', t);
+}
+function toggleMode() { applyTheme(html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark'); }
+(function() {
+  const saved = localStorage.getItem('qreafy-theme');
+  applyTheme(saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+})();
+
+/* ══ TABS ═══════════════════════════════════════ */
+function go(id, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(b => { b.classList.remove('on'); b.setAttribute('aria-selected','false'); });
+  document.getElementById('p-' + id).classList.add('on');
+  btn.classList.add('on'); btn.setAttribute('aria-selected','true');
+  if (id === 'url') loadHistory();
+}
+
+/* ══ TOAST ══════════════════════════════════════ */
+let _tt;
+function toast(msg, type='ok') {
+  const el = document.getElementById('toast');
+  document.getElementById('t-msg').textContent = msg;
+  document.getElementById('t-ico').textContent = {ok:'✓', er:'✕', info:'◈'}[type] || '◈';
+  el.className = 'toast on ' + type;
+  clearTimeout(_tt); _tt = setTimeout(() => el.classList.remove('on'), 3200);
+}
+
+/* ══ ERRORS ═════════════════════════════════════ */
+function showErr(id, msg) { const e=document.getElementById(id); e.textContent=msg; e.classList.add('on'); }
+function clrErr(id)       { const e=document.getElementById(id); e.textContent=''; e.classList.remove('on'); }
+function showRate(id)     { document.getElementById(id).classList.add('on'); }
+function hideRate(id)     { document.getElementById(id).classList.remove('on'); }
+
+/* ══ LOGO ═══════════════════════════════════════ */
+function onLogo(inp) {
+  const f = inp.files[0]; if (!f) return;
+  if (f.size > 3*1024*1024) { toast('Máx. 3 MB','er'); inp.value=''; return; }
+  if (!['image/png','image/jpeg','image/gif','image/webp'].includes(f.type)) {
+    toast('Formato no permitido','er'); inp.value=''; return;
+  }
+  const r = new FileReader();
+  r.onload = e => { const p=document.getElementById('logo-prev'); p.src=e.target.result; p.style.display='block'; };
+  r.readAsDataURL(f);
+}
+function clearLogo() {
+  document.getElementById('logo-file').value='';
+  const p=document.getElementById('logo-prev'); p.src=''; p.style.display='none';
+}
+const dz = document.getElementById('dz');
+dz.addEventListener('dragover', e=>{e.preventDefault();dz.classList.add('over');});
+dz.addEventListener('dragleave', ()=>dz.classList.remove('over'));
+dz.addEventListener('drop', e=>{
+  e.preventDefault(); dz.classList.remove('over');
+  const f=e.dataTransfer.files[0];
+  if(f){document.getElementById('logo-file').files=e.dataTransfer.files; onLogo({files:e.dataTransfer.files});}
+});
+
+/* ══ QR GENERATOR ═══════════════════════════════ */
+let lastQR = null;
+async function genQR() {
+  clrErr('qr-err'); hideRate('qr-rate');
+  const data = document.getElementById('qr-data').value.trim();
+  if (!data) { showErr('qr-err','⚠ Ingresa una URL o texto.'); return; }
+  if (data.length > 2000) { showErr('qr-err','⚠ Máx. 2000 caracteres.'); return; }
+
+  const btn=document.getElementById('btn-gen'), sp=document.getElementById('sp-qr');
+  btn.disabled=true; sp.style.display='inline-block';
+
+  const fd = new FormData();
+  fd.append('data',       data);
+  fd.append('size',       document.getElementById('sz').value);
+  fd.append('border',     document.getElementById('bd').value);
+  fd.append('fill_color', document.getElementById('fill').value);
+  fd.append('back_color', document.getElementById('back').value);
+  fd.append('logo_ratio', (document.getElementById('lr').value/100).toFixed(2));
+  const li=document.getElementById('logo-file');
+  if(li.files.length>0) fd.append('logo', li.files[0]);
+
+  try {
+    const res=await fetch('/api/generate-qr',{method:'POST',body:fd});
+    if(res.status===429){showRate('qr-rate');return;}
+    const json=await res.json();
+    if(json.error){showErr('qr-err','✕ '+json.error);return;}
+    lastQR='data:image/png;base64,'+json.qr;
+    const img=document.getElementById('qr-img');
+    img.src=lastQR; img.style.display='block';
+    document.getElementById('qr-ph').style.display='none';
+    document.getElementById('qr-acts').style.display='flex';
+    toast('¡QR generado!','ok');
+  } catch { showErr('qr-err','✕ Error de conexión.'); }
+  finally { btn.disabled=false; sp.style.display='none'; }
+}
+
+function dlQR() {
+  if(!lastQR) return;
+  const a=document.createElement('a'); a.href=lastQR; a.download='qreafy-'+Date.now()+'.png'; a.click();
+  toast('Descarga iniciada','ok');
+}
+async function cpQR() {
+  if(!lastQR) return;
+  try {
+    const blob=await(await fetch(lastQR)).blob();
+    await navigator.clipboard.write([new ClipboardItem({'image/png':blob})]);
+    toast('Imagen copiada','ok');
+  } catch { toast('Usa el botón descargar','er'); }
+}
+
+/* ══ URL SHORTENER ══════════════════════════════ */
+async function shortenURL() {
+  clrErr('url-err'); hideRate('url-rate');
+  const url=document.getElementById('long-url').value.trim();
+  if(!url){showErr('url-err','⚠ Ingresa una URL.');return;}
+
+  const btn=document.getElementById('btn-short'), sp=document.getElementById('sp-url');
+  btn.disabled=true; sp.style.display='inline-block';
+
+  try {
+    const res=await fetch('/api/shorten-url',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({url})
+    });
+    if(res.status===429){showRate('url-rate');return;}
+    const json=await res.json();
+    if(json.error){showErr('url-err','✕ '+json.error);return;}
+
+    document.getElementById('r-short').textContent=json.short_url;
+    document.getElementById('r-orig').textContent=json.original_url;
+    document.getElementById('url-res').classList.add('on');
+    updateKvBadge(json.kv);
+    // Save to localStorage immediately (works even if KV is down)
+    lsPush({short_url: json.short_url, original_url: json.original_url, ts: json.ts || Date.now()});
+    await loadHistory();
+    toast('URL acortada ✓','ok');
+  } catch { showErr('url-err','✕ Error de conexión.'); }
+  finally { btn.disabled=false; sp.style.display='none'; }
+}
+
+/* ══ HISTORY TOKEN ══════════════════════════════ */
+//* ══ HISTORY — Sistema híbrido localStorage + Redis KV ══════ */
+// localStorage: historial por dispositivo (inmediato, sin servidor)
+// Redis KV:     historial persistente del servidor (sincroniza entre dispositivos)
+// Estrategia: mostrar localStorage inmediatamente, luego fusionar con KV
+
+const LS_KEY = 'qreafy:history';
+const LS_MAX = 100;
+
+function lsLoad() {
+  try { return JSON.parse(localStorage.getItem(LS_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function lsSave(items) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(items.slice(0, LS_MAX))); }
+  catch {}
+}
+
+function lsPush(item) {
+  const items = lsLoad();
+  // Avoid duplicates by short_url
+  const filtered = items.filter(i => i.short_url !== item.short_url);
+  lsSave([item, ...filtered]);
+}
+
+function lsClear() {
+  try { localStorage.removeItem(LS_KEY); } catch {}
+}
+
+async function loadHistory() {
+  // 1. Show localStorage immediately (zero latency)
+  const local = lsLoad();
+  if (local.length) renderHist(local, false);
+
+  // 2. Try to fetch from server (Redis KV) and merge
+  try {
+    const res = await fetch('/api/history');
+    if (!res.ok) return;
+    const json = await res.json();
+    updateKvBadge(json.kv_available);
+
+    const server = json.history || [];
+    if (server.length) {
+      // Merge: server items first (most recent), deduplicate by short_url
+      const seen = new Set();
+      const merged = [...server, ...local].filter(i => {
+        if (seen.has(i.short_url)) return false;
+        seen.add(i.short_url);
+        return true;
+      });
+      lsSave(merged);
+      renderHist(merged, true);
+    } else if (local.length) {
+      renderHist(local, false);
+    } else {
+      renderHist([], false);
+    }
+  } catch {
+    // Server unavailable — localStorage already shown, nothing to do
+  }
+}
+
+async function clearHistory() {
+  // Always clear localStorage first (immediate feedback)
+  lsClear();
+  renderHist([]);
+  toast('Historial limpiado', 'ok');
+
+  // Then try to clear server KV (best-effort, no token needed for local clear)
+  try {
+    const res = await fetch('/api/history', { method: 'DELETE' });
+    if (!res.ok && res.status !== 401) {
+      // Silent — local already cleared, KV clear is optional
+    }
+  } catch {}
+}
+
+function updateKvBadge(available) {
+  const b=document.getElementById('kv-badge');
+  if(available){ b.textContent='⬤ persistente'; b.className='kv-badge kv-on'; }
+  else          { b.textContent='⬤ local';       b.className='kv-badge kv-off'; }
+}
+
+function renderHist(items, fromServer) {
+  const ul=document.getElementById('hist');
+  const count=document.getElementById('hist-count');
+  const statsBar=document.getElementById('stats-bar');
+  ul.innerHTML='';
+
+  if(!items.length){
+    const li=document.createElement('li');
+    li.id='hist-empty';
+    li.style.cssText='color:var(--muted);font-family:var(--mono);font-size:.73rem;text-align:center;padding:1.5rem 0;';
+    li.textContent='Tus URLs acortadas aparecerán aquí';
+    ul.appendChild(li);
+    count.textContent=''; statsBar.style.display='none'; return;
+  }
+
+  count.textContent=`${items.length} enlace${items.length!==1?'s':''}`;
+  statsBar.style.display='flex';
+  document.getElementById('stat-total').textContent=items.length;
+  // Count items from today using ts field
+  const today = items.filter(h=>h.ts && Date.now()-h.ts<86400000).length;
+  document.getElementById('stat-today').textContent=today || items.length;
+
+  items.forEach(h=>{
+    const li=document.createElement('li'); li.className='hist-item';
+    const s=document.createElement('span'); s.className='h-short'; s.textContent=h.short_url;
+    const o=document.createElement('span'); o.className='h-orig';  o.textContent=h.original_url; o.title=h.original_url;
+    const b=document.createElement('button'); b.className='cp-btn h-cp btn-sm';
+    b.textContent='⎘'; b.setAttribute('aria-label','Copiar');
+    b.onclick=()=>cpText(h.short_url,b);
+    li.append(s,o,b); ul.appendChild(li);
+  });
+}
+
+function cpURL() { cpText(document.getElementById('r-short').textContent, document.getElementById('cp-main')); }
+function cpText(txt,btn) {
+  navigator.clipboard.writeText(txt).then(()=>{
+    if(btn){btn.classList.add('done');setTimeout(()=>btn.classList.remove('done'),1800);}
+    toast('Copiado','ok');
+  }).catch(()=>toast('No se pudo copiar','er'));
+}
+function urlToQR() {
+  document.getElementById('qr-data').value=document.getElementById('r-short').textContent;
+  go('qr',document.querySelectorAll('.tab')[0]);
+  toast('URL cargada en el generador','info');
+}
+
+/* ══ ENTER KEY ══════════════════════════════════ */
+document.getElementById('long-url').addEventListener('keydown',e=>{if(e.key==='Enter')shortenURL();});
+document.getElementById('qr-data').addEventListener('keydown', e=>{if(e.key==='Enter')genQR();});
+
+/* ══ INIT ═══════════════════════════════════════ */
+loadHistory();
+</script>
+</body>
+</html>
