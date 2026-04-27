@@ -1,6 +1,7 @@
-flask>=3.0.0
-qrcode[pil]>=7.4.2
-Pillow>=10.0.0
-requests>=2.31.0
-upstash-redis>=1.0.0
-flask-limiter>=3.5.0
+flask==3.0.3
+qrcode[pil]==8.1
+Pillow==10.4.0
+requests==2.32.3
+upstash-redis==1.0.0
+flask-limiter==3.5.0
+gunicorn==22.0.0
