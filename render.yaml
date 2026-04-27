@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: qrea-fy
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn api.index:app --bind 0.0.0.0:$PORT --workers 2 --timeout 30
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.0
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: HISTORY_TOKEN
+        generateValue: true
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false
