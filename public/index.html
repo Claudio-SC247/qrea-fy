@@ -14,7 +14,6 @@
   <link rel="stylesheet" href="/app.css"/>
 </head>
 <body>
-
 <header>
   <a class="logo" href="/" aria-label="Qrea-fy inicio">
     <svg class="logo-ico" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -46,15 +45,12 @@
     <button class="mode-btn" id="mode-btn" aria-label="Cambiar modo claro/oscuro">&#x1F319;</button>
   </div>
 </header>
-
 <main>
   <div class="hero">
     <div class="badge">&#x2605; Herramienta de productividad</div>
     <h1>Crea QRs<br><span class="grd">sin límites</span></h1>
     <p>Personaliza colores, inserta tu logo y acorta URLs al instante. Sin registros.</p>
   </div>
-
-  <!-- PANEL QR -->
   <div id="p-qr" class="panel on" role="tabpanel">
     <div class="g2">
       <div class="col-stack">
@@ -73,13 +69,13 @@
           </div>
         </div>
         <div class="card">
-          <div class="card-lbl">Tamaño &amp; Borde</div>
+          <div class="card-lbl">Tama&ntilde;o &amp; Borde</div>
           <div class="f">
-            <label>Celda — <span id="sv">10</span> px</label>
+            <label>Celda &mdash; <span id="sv">10</span> px</label>
             <input type="range" id="sz" min="4" max="22" value="10"/>
           </div>
           <div class="f">
-            <label>Margen — <span id="bv">2</span> celdas</label>
+            <label>Margen &mdash; <span id="bv">2</span> celdas</label>
             <input type="range" id="bd" min="0" max="8" value="2"/>
           </div>
         </div>
@@ -88,11 +84,11 @@
           <div class="drop" id="dz" role="button" aria-label="Subir logo">
             <input type="file" id="logo-file" accept="image/png,image/jpeg,image/gif,image/webp"/>
             <span class="drop-ico" aria-hidden="true">&#x1F5BC;</span>
-            <div class="drop-txt"><strong>Arrastra tu imagen</strong> o haz clic<br>PNG &middot; JPG &middot; GIF &middot; WEBP &mdash; máx. 3 MB</div>
+            <div class="drop-txt"><strong>Arrastra tu imagen</strong> o haz clic<br>PNG &middot; JPG &middot; GIF &middot; WEBP &mdash; m&aacute;x. 3 MB</div>
             <img id="logo-prev" src="" alt="Vista previa del logo"/>
           </div>
           <div class="f logo-ratio-wrap">
-            <label>Tamaño logo — <span id="rv">28</span>%</label>
+            <label>Tama&ntilde;o logo &mdash; <span id="rv">28</span>%</label>
             <input type="range" id="lr" min="10" max="42" value="28"/>
           </div>
           <button class="btn btn-s btn-sm btn-clear-logo" id="btn-clear-logo">&#x2715; Quitar logo</button>
@@ -101,15 +97,15 @@
           <span class="spin" id="sp-qr" aria-hidden="true"></span>&#x25C8; Generar QR
         </button>
         <div class="err" id="qr-err" role="alert"></div>
-        <div class="rate-warn" id="qr-rate">&#x26A0; Límite alcanzado. Espera un momento antes de generar otro QR.</div>
+        <div class="rate-warn" id="qr-rate">&#x26A0; L&iacute;mite alcanzado. Espera un momento.</div>
       </div>
       <div class="card sticky-col">
         <div class="card-lbl">Vista previa</div>
         <div class="qr-area">
           <div class="qr-ph" id="qr-ph" aria-live="polite">
-            <div class="qr-ph-ico" aria-hidden="true">&#x25A3;</div>Tu QR aparecerá aquí
+            <div class="qr-ph-ico" aria-hidden="true">&#x25A3;</div>Tu QR aparecer&aacute; aqu&iacute;
           </div>
-          <img id="qr-img" src="" alt="Código QR generado"/>
+          <img id="qr-img" src="" alt="C&oacute;digo QR generado"/>
         </div>
         <div class="qr-acts" id="qr-acts">
           <button class="btn btn-p" id="btn-dl-qr">&#x2B07; Descargar PNG</button>
@@ -118,8 +114,6 @@
       </div>
     </div>
   </div>
-
-  <!-- PANEL URL -->
   <div id="p-url" class="panel" role="tabpanel">
     <div class="g2">
       <div class="col-stack">
@@ -132,13 +126,13 @@
           <div class="f">
             <label for="long-url">URL larga *</label>
             <div class="url-bar">
-              <input type="url" id="long-url" placeholder="https://ejemplo.com/ruta-muy-larga" maxlength="2000" autocomplete="off"/>
+              <input type="url" id="long-url" placeholder="https://ejemplo.com/ruta-larga" maxlength="2000" autocomplete="off"/>
               <button class="btn btn-p btn-sm" id="btn-short">
                 <span class="spin" id="sp-url" aria-hidden="true"></span>Acortar
               </button>
             </div>
             <div class="err" id="url-err" role="alert"></div>
-            <div class="rate-warn" id="url-rate">&#x26A0; Límite alcanzado. Espera un momento antes de acortar otra URL.</div>
+            <div class="rate-warn" id="url-rate">&#x26A0; L&iacute;mite alcanzado. Espera un momento.</div>
           </div>
           <div class="res-box" id="url-res" aria-live="polite">
             <div class="res-lbl">&#x1F517; URL acortada</div>
@@ -168,12 +162,10 @@
     </div>
   </div>
 </main>
-
 <div class="toast" id="toast" role="status" aria-live="polite">
   <span id="t-ico" aria-hidden="true"></span>
   <span id="t-msg"></span>
 </div>
-
 <script src="/app.js" defer></script>
 </body>
 </html>
