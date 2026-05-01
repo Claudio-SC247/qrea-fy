@@ -50,8 +50,6 @@
 
 ## Seguridad
 
-El proyecto tiene hardening activo en **13 vectores de ataque**. Ver [`SECURITY.md`](SECURITY.md) para reportar vulnerabilidades.
-
 Protecciones implementadas:
 
 - **DoS** — Rate limiting distribuido con Redis (fail-safe en memoria si Redis cae)
@@ -85,7 +83,6 @@ qrea-fy/
 ├── README.md
 ├── render.yaml            → Deploy automático en Render
 ├── requirements.txt       → Dependencias con versiones exactas
-└── SECURITY.md
 ```
 
 ---
