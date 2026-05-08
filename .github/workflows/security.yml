@@ -1,46 +1,46 @@
 name: DevSecOps Pipeline
 
 on:
-  push:
-    branches: ["**"]
-  pull_request:
-    branches: [main]
-  schedule:
-    - cron: "0 8 * * 1"
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 8 * * 1"
 
 jobs:
-  sast-and-audit:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Descargar el código
-        uses: actions/checkout@v4
+  sast-and-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
 
-      - name: Configurar Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Configurar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-      - name: Instalar herramientas de seguridad
-        run: |
-          python -m pip install --upgrade pip
-          pip install bandit pip-audit
+      - name: Instalar herramientas de seguridad
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit pip-audit
 
-      - name: Auditar dependencias (pip-audit)
-        run: |
-          pip-audit -r requirements.txt --format json --output audit.json || true
-          pip-audit -r requirements.txt
+      - name: Auditar dependencias (pip-audit)
+        run: |
+          pip-audit -r requirements.txt --format json --output audit.json || true
+          pip-audit -r requirements.txt
 
-      - name: Subir reporte de auditoría (Artifact)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: reporte-pip-audit
-          path: audit.json
-          retention-days: 7
-          if-no-files-found: warn
+      - name: Subir reporte de auditoría (Artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reporte-pip-audit
+          path: audit.json
+          retention-days: 7
+          if-no-files-found: warn
 
-      - name: Escanear código (Bandit SAST)
-        run: |
-          bandit -r api/ \
-            --severity-level medium \
-            --skip B104
+      - name: Escanear código (Bandit SAST)
+        run: |
+          bandit -r api/ \
+            --severity-level medium \
+            --skip B104
