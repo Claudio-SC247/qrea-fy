@@ -1,20 +1,3 @@
-"""
-Qrea-fy — API backend v2.3
-Security hardening — 2026-04-29
-
-Patches vs v2.2:
-  [CRITICAL] INFRA-01  render.yaml $PORT fix
-  [HIGH]     DOS-01    Rate limiter fail-SAFE: in-memory fallback when Redis down
-  [HIGH]     DOS-02    IP spoofing fixed: use request.remote_addr
-  [HIGH]     EXFIL-01  History rate-limited aggressively; export endpoint added
-  [MEDIUM]   INFO-01   /api/health hides version and KV state
-  [MEDIUM]   SSRF-01   _resolve_url: (3s connect, 5s read) timeout, stops at HEAD success
-  [MEDIUM]   HDR-01    Cache-Control: no-store on APIs, /robots.txt, /.well-known/security.txt
-  [MEDIUM]   AI-01     Shortener response: validate prefix + reject dangerous schemes
-  [MEDIUM]   RAN-01    /api/history/export — token-protected backup endpoint
-  [LOW]      SC-01     Unified HTTP: urllib.request removed, requests only
-"""
-
 import os, io, re, json, hmac, time, hashlib, base64, logging
 import ipaddress, socket, urllib.parse, uuid, warnings
 import threading
