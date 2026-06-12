@@ -6,8 +6,10 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: "0 8 * * 1"
-
+    - cron: "0 5 * * 1"
+permissions:
+  contents: read
+  
 jobs:
   sast-and-audit:
     runs-on: ubuntu-latest
