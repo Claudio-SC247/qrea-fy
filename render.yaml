@@ -5,6 +5,7 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: sh -c "gunicorn api.index:app --bind 0.0.0.0:$PORT --workers 2 --timeout 30 --access-logfile - --error-logfile -"
     plan: free
+    healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.0
