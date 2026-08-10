@@ -7,18 +7,19 @@ on:
     branches: [main]
   schedule:
     - cron: "0 5 * * 1"
+
 permissions:
   contents: read
-  
+
 jobs:
   sast-and-audit:
     runs-on: ubuntu-latest
     steps:
       - name: Descargar el código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Configurar Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -29,12 +30,16 @@ jobs:
 
       - name: Auditar dependencias (pip-audit)
         run: |
-          pip-audit -r requirements.txt --format json --output audit.json || true
-          pip-audit -r requirements.txt
+          set +e
+          pip-audit -r requirements.txt --format json --output audit.json
+          pip-audit -r requirements.txt --format markdown >> "$GITHUB_STEP_SUMMARY"
+          exit_code=$?
+          set -e
+          exit $exit_code
 
       - name: Subir reporte de auditoría (Artifact)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: reporte-pip-audit
           path: audit.json
