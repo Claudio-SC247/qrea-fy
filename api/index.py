@@ -1,4 +1,4 @@
-import os, io, re, json, hmac, time, hashlib, base64, logging
+import os, sys, io, re, json, hmac, time, hashlib, base64, logging
 import ipaddress, socket, urllib.parse, uuid, warnings
 import threading
 from collections import defaultdict
@@ -30,7 +30,13 @@ BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PUBLIC_DIR = os.path.join(BASE_DIR, "public")
 
 app = Flask(__name__, static_folder=PUBLIC_DIR, static_url_path="")
-app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET_KEY") or __import__("secrets").token_hex(32)
+
+# Fail fast if the signing key is missing — no silent random fallback (AUDITORIA #3)
+_FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY")
+if not _FLASK_SECRET_KEY:
+    logger.critical("FLASK_SECRET_KEY is not set — aborting startup. It is required in every environment (see README).")
+    sys.exit(1)
+app.config["SECRET_KEY"] = _FLASK_SECRET_KEY
 app.config["MAX_CONTENT_LENGTH"] = 4 * 1024 * 1024
 
 MAX_DATA_LEN = 2000; MAX_LOGO_BYTES = 3*1024*1024; MAX_JSON_BYTES = 10_000
@@ -42,6 +48,9 @@ _REQ_HEADERS = {
     "User-Agent": "qreafy/2.3 (+https://github.com/Claudio-SC247/qrea-fy)",
     "Accept": "text/plain",
 }
+
+# Reused connection pool for outbound calls (resolve + shortener fallback)
+_http_session = requests.Session()
 
 _SHORTENER_DOMAINS = {
     "goo.gl","bit.ly","tinyurl.com","t.co","ow.ly","buff.ly","ift.tt","dlvr.it",
@@ -71,6 +80,7 @@ RATE_LIMITS = {
 # [DOS-01] In-memory fallback rate limiter
 _mem_rl_lock   = threading.Lock()
 _mem_rl_counts = defaultdict(lambda: {"count":0, "window":0})
+_redis_rl_degraded = False  # tracks Redis→memory transitions so we log ERROR once, not per request
 
 def _get_ip() -> str:
     # [DOS-02] Use remote_addr — Render's proxy layer already resolves real IP
@@ -86,6 +96,7 @@ def _mem_rate_check(key:str, limit:int, window_secs:int) -> bool:
         return e["count"] > limit
 
 def _is_rate_limited(endpoint:str) -> bool:
+    global _redis_rl_degraded
     limits = RATE_LIMITS.get(endpoint, {"per_min":30,"per_hour":300})
     ip = _get_ip(); now = int(time.time())
     if KV_AVAILABLE:
@@ -99,9 +110,16 @@ def _is_rate_limited(endpoint:str) -> bool:
                 if count > limit:
                     logger.warning("RATE[redis] %s ip=%.12s count=%d", endpoint, ip, count)
                     return True
+            if _redis_rl_degraded:
+                logger.info("Redis RL recovered — leaving memory fallback.")
+                _redis_rl_degraded = False
             return False
         except Exception as exc:
-            logger.warning("Redis RL error, using memory fallback: %s", exc)
+            if _redis_rl_degraded:
+                logger.warning("Redis RL error, using memory fallback: %s", exc)
+            else:
+                _redis_rl_degraded = True
+                logger.error("Redis RL DOWN, entering memory fallback: %s", exc)
     # [DOS-01] Memory fallback — fail-SAFE
     if _mem_rate_check(f"m:{endpoint}:{ip[:20]}", limits["per_min"], 60):
         logger.warning("RATE[mem] %s ip=%.12s", endpoint, ip)
@@ -162,7 +180,7 @@ def _resolve_url(url:str) -> str:
     kwargs = dict(allow_redirects=True, timeout=(3,5), headers=_REQ_HEADERS)
     for method, extra in [("head",{}),("get",{"stream":True})]:
         try:
-            resp = getattr(requests, method)(url, **kwargs, **extra)
+            resp = getattr(_http_session, method)(url, **kwargs, **extra)
             if method == "get": resp.close()
             final = resp.url
             if final and final != url and final.startswith(("http://","https://")):
@@ -194,7 +212,7 @@ def _verify_token(req) -> bool:
 def _shorten_with_fallback(url:str) -> str | None:
     for p in _SHORTENER_PROVIDERS:
         try:
-            resp = requests.get(p["api"], params={**p["params"],"url":url},
+            resp = _http_session.get(p["api"], params={**p["params"],"url":url},
                 timeout=(3,5), headers=_REQ_HEADERS)
             if resp.status_code == 200:
                 short = resp.text.strip()[:512]
@@ -263,7 +281,6 @@ def sec_headers(resp:Response) -> Response:
     resp.headers.update({
         "X-Content-Type-Options":       "nosniff",
         "X-Frame-Options":              "DENY",
-        "X-XSS-Protection":             "1; mode=block",
         "Referrer-Policy":              "strict-origin-when-cross-origin",
         "Permissions-Policy":           "camera=(), microphone=(), geolocation=()",
         "Strict-Transport-Security":    "max-age=63072000; includeSubDomains; preload",
