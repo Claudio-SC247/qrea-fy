@@ -15,15 +15,29 @@ logging.basicConfig(level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
     handlers=[logging.StreamHandler()])
 logger = logging.getLogger("qreafy")
-
 # Upstash Redis
 try:
     from upstash_redis import Redis
-    _kv = Redis.from_env(); _kv.ping(); KV_AVAILABLE = True
-    logger.info("Upstash Redis: connected.")
+    import os
+    
+    # Forzamos la lectura de tus variables de entorno personalizadas de Upstash
+    upstash_url = os.environ.get("UPSTASH_REDIS_REST_URL")
+    upstash_token = os.environ.get("UPSTASH_REDIS_REST_TOKEN")
+    
+    if upstash_url and upstash_token:
+        _kv = Redis(url=upstash_url, token=upstash_token)
+        _kv.ping()
+        KV_AVAILABLE = True
+        logger.info("Upstash Redis: conectado exitosamente vía REST.")
+    else:
+        # Si las variables no están listas, activa el modo de respaldo en memoria sin romper la app
+        _kv = None
+        KV_AVAILABLE = False
+        logger.warning("Faltan variables de Upstash Redis. Usando respaldo en memoria.")
 except Exception as exc:
-    _kv = None; KV_AVAILABLE = False
-    logger.warning("Redis unavailable: %s", exc)
+    _kv = None
+    KV_AVAILABLE = False
+    logger.warning("Redis no disponible (usando respaldo en memoria): %s", exc)
 
 KV_KEY = "qreafy:url_history"; KV_MAX_ITEMS = 100
 BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
